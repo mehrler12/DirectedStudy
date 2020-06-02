@@ -14,7 +14,7 @@ This extension to the Kalman Filter leads us to the research question that will 
 ### Kalman Filtering
 Explain the basics of Kalman Filtering. Predict and update phase as well as the process noise matrices.
 ### Adaptive Kalman Filtering
-Explain where Adaptive Kalman Filtering extends Kalman Filtering, paper uses least squares error wind profiler to estimate wind conditions every few iterations. Some other variations of AKF with diffrent estimators. Will likely focus on the ones using estimators but if there's time this term I'd love to include a variant I found that essentially runs the Kalman Filter with every likely noise matrix (Wind turbulence in this case) and combines them together, feels like a lot of parrallel potential there.
+Explain where Adaptive Kalman Filtering extends Kalman Filtering, paper uses least squares error wind profiler to estimate wind conditions every few iterations. Some other variations of AKF with diffrent estimators. Will likely focus on the ones using estimators but if there's time this term I'd love to include a variant I found that essentially runs the Kalman Filter with every likely noise matrix (Wind turbulence in this case) and combines them together, feels like a lot of parrallel potential there. Also include what might make them trickier to parallelize (Potential data dependency on constantly changing process matricies, depends on how it its implemented).
 ### GPUs
 Explain important parts of GPUs and how they achieve their parallelization, warps, threads, streaming multiprocessors, etc.
 
