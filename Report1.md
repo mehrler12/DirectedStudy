@@ -8,11 +8,21 @@ The most time consuming step is taking the data coming from the WFS and reconstr
 
 A downside of using the Kalman filter is that you need good knowledge of the atmospheric conditions for it to work optimally, if the atmospheric conditions change the accuracy of the filter lowers significantly. An interesting proposed extension of the Kalman filter is the Adaptive Kalman Filter. This allows the algorithm to slightly adjust the matrices that represent the processes like wind speed to better compensate for changing conditions.
 
-This extension to the Kalman Filter leads us to the research question that will be addressed by this report. *Does making the Kalman Filter adaptive add complexity that no longer makes it efficient to parallelize on a GPU?*. Answering this question is important as it can tell us whether a wavefront reconstruction method based on Adaptive Kalman Filtering can be implemented on a GPU or whether another approach is required. It is also potentially useful in more than just large telescopes, adaptive optics is also used to image human eyes or to correct for atmospheric distortion in lasers shot into space for either satellite communication or removal of space debris.
+This extension to the Kalman Filter leads us to the research question that will be addressed by this report. *Does making the Kalman Filter adaptive add complexity that makes it less efficient to parallelize on a GPU?*. Answering this question is important as it can tell us whether a wavefront reconstruction method based on Adaptive Kalman Filtering can be implemented on a GPU or whether another approach is required. It is also potentially useful in more than just large telescopes, adaptive optics is also used to image human eyes or to correct for atmospheric distortion in lasers shot into space for either satellite communication or removal of space debris. Adaptive Kalman filters are also used outside of adaptive optics in things like target tracking, robotics, or data fusion of sensor data.
 
 ## Background
 ### Kalman Filtering
+Explain the basics of Kalman Filtering. Predict and update phase as well as the process noise matrices.
+### Adaptive Kalman Filtering
+Explain where Adaptive Kalman Filtering extends Kalman Filtering, paper uses least squares error wind profiler to estimate wind conditions every few iterations. Some other variations of AKF with diffrent estimators. Will likely focus on the ones using estimators but if there's time this term I'd love to include a variant I found that essentially runs the Kalman Filter with every likely noise matrix (Wind turbulence in this case) and combines them together, feels like a lot of parrallel potential there.
 ### GPUs
+Explain important parts of GPUs and how they achieve their parallelization, warps, threads, streaming multiprocessors, etc.
 
 ## Related Work
+### Kalman Filtering in Adaptive Optics
+Overview of papers on kalman filtering of contributions from papers on KF in AO, will include most papers from the bib
+### Adaptive Kalman Filtering
+Overview of papers on making the kalman filter adaptive, outline various methods people use. (May not be nessecary as much will be covered in the background section)
+### Kalman Filters on GPUs
+There's not a ton of papers in this area but overview papers on putting Kalman filters on GPUs
 
