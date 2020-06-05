@@ -34,9 +34,9 @@ The update stage takes the measured value and *combines* it with the prediction.
 These steps are then repeated for every time step to filter the incoming measurements and output a more accurate measurement.
 
 ### Adaptive Kalman Filtering
-For the Kalman Filter to effectively work we need to know the various errors that may affect our predictions (i.e the wind will affect atmospheric turbulence so we need to know how the wind will act), in real cases we may not always know these values (wind speed can change very rapidly). In the equations above these are the matrices Q and R. We can compensate for this by making the filter adaptive and able to change Q and R as it goes along. This lets us compensate for rapid changes in wind speed or other changes in the underlying parameters.
+For the Kalman Filter to work effectively we need to know the noise matrices Q and R from the equations above. Most examples of the Kalman Filter calculate these before the filter is running from prior knowledge of the system. However in some cases we don't know these noise matrices beforehand or they may change as time goes on (i.e changes in wind speed or sharp turns in a car). Making the filter adaptive allows us to estimate Q and R as part of each step, this ultimately makes the filter more accurate as it can adapt to new conditions. There are a few common ways to do this which will be surveyed in the related woks section below.
 
-Explain where Adaptive Kalman Filtering extends Kalman Filtering, paper uses least squares error wind profiler to estimate wind conditions every few iterations. Some other variations of AKF with diffrent estimators. Will likely focus on the ones using estimators but if there's time this term I'd love to include a variant I found that essentially runs the Kalman Filter with every likely noise matrix (Wind turbulence in this case) and combines them together, feels like a lot of parrallel potential there. Also include what might make them trickier to parallelize (Potential data dependency on constantly changing process matricies, depends on how it its implemented).
+Introducing this adaptive step into the filter process will potentially affect parallelization depending on how it's implemented. Constantly changing Q and R will potentially cause a data dependcy on them as the GPU cannot work as far ahead until it knows the value of Q and R. Additionally the process of estimating Q and R may not be parallelizable which would make the whole algorithm subject to Amahdl's law.
 
 ## Related Work
 ### Kalman Filtering in Adaptive Optics
@@ -44,5 +44,9 @@ Overview of papers on kalman filtering of contributions from papers on KF in AO,
 ### Adaptive Kalman Filtering
 Overview of papers on making the kalman filter adaptive, outline various methods people use. (May not be nessecary as much will be covered in the background section)
 ### Kalman Filters on GPUs
-There's not a ton of papers in this area but overview papers on putting Kalman filters on GPUs
+Basic Kalman Filters have been shown to be quite effective when running on a GPU. Huang et. al. present a GPU implementation of the Kalman Filter with a maximum observed speedup of 7398x [1][Huang2011]. Campora and Awile present a more general SIMD approach for use at the LHC in CERN [2][Campora2018].
+
+[Hung2011]: https://ieeexplore.ieee.org/document/6121397 "M.-Y. Huang, S.-C. Wei, B. Huang, and Y.-L. Chang, “Accelerating the Kalman Filter on a GPU,” in 2011 IEEE 17th International Conference on Parallel and Distributed Systems, 2011, pp. 1016–1020, doi: 10.1109/ICPADS.2011.153."
+
+[Campora2018]: https://onlinelibrary.wiley.com/doi/full/10.1002/cpe.4483 "D. H. Campora Perez and O. Awile, “An efficient low-rank Kalman filter for modern SIMD architectures,” Concurrency and Computation: Practice and Experience, vol. 30, no. 23, p. e4483, 2018."
 
