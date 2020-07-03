@@ -67,14 +67,12 @@ __global__ void elementSubtractBMinusA(float *a, float *b, int rows, int cols){
     }
 }
 
-__global__ void calcMean(float *a[],float *b,int rows,int cols,int stackHeight){
+__global__ void calcMean(float *a,float *b,int rows,int cols,int stackHeight){
     int const index = threadIdx.x + blockIdx.x * blockDim.x;
-    printf("%d\n",a[0][index]);
 
     if(index < rows*cols){
         for(int i = 0; i < stackHeight;i++ ){
-            printf("%d\n",a[i][index]);
-            b[index] += a[i][index];
+            b[index] += a[index + (i*rows*cols)];
         }
         b[index] /= stackHeight;
     }
@@ -86,7 +84,7 @@ void kalman(float measurements[][16],int num_measurements, int measurement_rows,
     float *result;
     int *dev_info;
     float *dev_kalman_top,*dev_residual;
-    float *dev_innovation_bank[WINDOW_SIZE];
+    float *dev_innovation_bank;
 
     int four_by_four_float_array_size = measurement_columns * measurement_rows* sizeof(float);
 
@@ -106,11 +104,8 @@ void kalman(float measurements[][16],int num_measurements, int measurement_rows,
     cudaMalloc((void **) &dev_info,sizeof(int));
     cudaMalloc((void **) &dev_kalman_top,four_by_four_float_array_size);
     cudaMalloc((void **) &dev_residual,four_by_four_float_array_size);
-    cudaMalloc((void **) &dev_innovation_bank,sizeof(dev_innovation_bank));
-    for(int i = 0; i < WINDOW_SIZE;i++){
-        cudaMalloc((void **) &dev_innovation_bank[i],four_by_four_float_array_size);
-    }
-
+    cudaMalloc((void **) &dev_innovation_bank,four_by_four_float_array_size*WINDOW_SIZE);
+   
     checkCudaErrors();
 
     cudaMemcpy(dev_measurement,measurements[1],four_by_four_float_array_size,cudaMemcpyHostToDevice);
@@ -165,13 +160,22 @@ void kalman(float measurements[][16],int num_measurements, int measurement_rows,
         stat = cublasSgemm(handle, CUBLAS_OP_N, CUBLAS_OP_T, measurement_rows, measurement_columns, measurement_columns, &alpha, dev_residual, measurement_rows, dev_residual, measurement_rows, &beta, dev_temp, measurement_rows);
         checkCublasError(stat,17);
         //Move Residual into bank
-        printf("%d\n",((i-1)%WINDOW_SIZE));
-        cudaMemcpy(dev_innovation_bank[((i-1) % WINDOW_SIZE)],dev_temp,four_by_four_float_array_size,cudaMemcpyDeviceToDevice);
+        int offset = ((i-1)%WINDOW_SIZE) * measurement_rows* measurement_columns;
+        cudaMemcpy(dev_innovation_bank + offset,dev_temp,four_by_four_float_array_size,cudaMemcpyDeviceToDevice);
         checkCudaErrors();
+        
         if(i>=WINDOW_SIZE){
-            calcMean<<<4,4>>>(&dev_innovation_bank,dev_temp,measurement_rows,measurement_columns,WINDOW_SIZE);
+            printf("test\n");
+            calcMean<<<4,4>>>(dev_innovation_bank,dev_temp,measurement_rows,measurement_columns,WINDOW_SIZE);
             checkCudaErrors();
-            cudaMemcpy(result,dev_temp,four_by_four_float_array_size,cudaMemcpyDeviceToHost);
+
+            stat = cublasSgemm(handle, CUBLAS_OP_N, CUBLAS_OP_N, measurement_rows, measurement_columns, measurement_columns, &alpha, dev_kalman_gain, measurement_rows, dev_temp, measurement_rows, &beta, dev_temp, measurement_rows);
+            checkCublasError(stat,18);
+
+            stat = cublasSgemm(handle, CUBLAS_OP_N, CUBLAS_OP_T, measurement_rows, measurement_columns, measurement_columns, &alpha, dev_temp, measurement_rows, dev_kalman_gain, measurement_rows, &beta, dev_process_noise, measurement_rows);
+            checkCublasError(stat,19);
+
+            cudaMemcpy(result,dev_process_noise,four_by_four_float_array_size,cudaMemcpyDeviceToHost);
             printMatrix(result,measurement_rows,measurement_columns);
         }
 
