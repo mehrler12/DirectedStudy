@@ -51,9 +51,76 @@ After showing our approach works we are able to move our implementation to a par
 
 Specific profiling will be discussed later but we can show correctness of this implementation by comparing the final predicted state of the CUDA implementation with the final predicted state of the Julia implementation. Since the Kalman filter is an iterative process any errors throughout the process would cause the final predicted state to change. The final predicted state of the CUDA implementation matches the Julia implementation so we can assume it to be correct.
 
+## Adaptive Kalman Filter Implementation
+The IAE Kalman Filter was implemented for this section. This filter was chosen as it is similar to the wind estimation filter as they both use additional data to provide an estimate of the process noise. The IAE filter is more generalizable to other problems and easier to show it's working. 
 
+The IAE filter works by storing a sliding window of previous residuals (difference between filtered prediction), it uses these to calculate a covariance matrix for the window of residuals or the "Innovation Bank". We can then get an estimate of the process noise from this multiplying by the Kalman Gain and it's transpose which are computed as part of the update step of the Kalman Filter. We only start using this estimate when we've filled the innovation bank (for this experiment the innovation bank contains 20 measurements). 
 
+To fully test the correctness of the adaptive filter we need something for it to adapt to. The wind filter uses changes in wind velocity and direction, here we'll use a large change in acceleration (small changes work too but large ones provide more obvious results). When generating the data we scale up the X acceleration by 100x on the 50th measurement. The resulting new gold set is shown in Figure 5 and the noisy set is shown in Figure 6. 
 
+![AccelGold](..\Figures\AccelGold.svg)
+*Figure 5: Gold Set for Data with Acceleration Change*
+
+![AccelNoise](..\Figures\AccelNoise.svg)
+*Figure 6: Noisy Set for Data with Acceleration Change*
+
+Running the regular Kalman Filter on this data produces a relatively smooth estimate as seen in Figure 8 but produces a fairly poor estimate of the final position of the objects, particularly in the X direction by the errors given below.
+
+| Object1  | Object 2 | Object3 | Object4  |
+| -------- | -------- | ------- | -------  | 
+| 53.6093  | -55.1811 | 28.8641 | -2.54927 |  
+| -4.3168  | -2.13116 | 0.768699| -1.59684 | 
+| 6.39331  | -5.86632 | 3.47124 | -0.0962858 |
+| -0.463265 | 0.342064 |  0.0178901 | -0.699094 |
+
+![AccelFilter](..\Figures\AccelFilterNonAdaptive.svg)
+*Figure 7: Filtered Data for Non Adaptive*
+
+Additionally, as seen in Figure 8 the residual error never recovers from the change in acceleration.
+![AccelEps](..\Figures\AccelEps.svg)
+*Figure 8: Residual Error for Non-Adaptive Filter with Acceleration Change*
+
+Adding in the adaptive step makes the filtered output much less smooth (this is because it knows it needs to trust the measurements more after the change in acceleration) as seen in Figure 9. However we do see that the prediction of the final positions are considerably better and the residual error quickly recovers from the acceleration change in Figure 10.
+
+| Object1  | Object 2 | Object3 | Object4  |
+| -------- | -------- | ------- | -------  |
+| 1.3143   | -3.8038  | 2.00627 |    0.125083 | 
+| -1.61781 | 1.53223  | -0.610657 |   1.02988  |
+| -0.7435  | -0.188036|  -0.461091 |  -0.0928009 |
+| -0.340537| 0.139955 | -0.0736227 | -0.0159091 |
+
+![AccelAdaptFilter](..\Figures\AccelAdaptiveFiltered.svg)
+*Figure 9: Filtered Data for Acceleration change with adaptation*
+
+![AdaptiveError](..\Figures\AdaptiveEps.svg)
+*Figure 10: Residual error for adaptive filter*
+
+## Cuda Implementation
+The CUDA implementation of the Adaptive Filter is roughly the same as the Non-Adaptive Filter, they both have the same structure and use CUBLAS for matrix operations. The significant difference is the Innovation Bank, in this implementation we use a 1D matrix of the size of the sliding window times 16 (size of the state matrix). Memory accesses and usage is usually a significant bottleneck for CUDA so needing to store and access an extra 20 matrices could cause significant reduction of parallel suitability. This problem will only get worse as the state matrices get larger in the case of Extremely Large Telescopes.
+
+We can show that the CUDA implementation is working by comparing the final predictions of both implementations. We find that they are very slightly different but close enough that it is likely a floating point error, however this will be investigated further in the future. 
+
+## Profiling and Future Optimizations
+As comparison between the 2 implementations is the focus of report 3 this section will primarily focus on outlining plans for optimizing the CUDA implementations. The profiling will focus on the Adaptive Filter since it's an extension of the Non-Adaptive Filter any optimizations for the Non-Adaptive Filter also apply to the adaptive one. 
+
+A preliminary experiment confirms that the Adaptive Filter is slower than the Non-Adaptive Filter. Running the Non-Adaptive Filter with 100 4x4 measurements takes around 46090 us averaged over 100 runs. The Adaptive Filter takes around 53424 us under the same conditions.
+
+Profiling using Nvidia Nsight reveals some interesting areas for optimization, they are organized into the sections below.
+
+### Increase Utilization
+GPU Utilization is remarkably low at around 13%. This suggests that we might be able to perform some of the CUBLAS operations simultaneously in different CUDA streams. Additionally transferring the new measurement to device and the filtered measurement to host asynchronously could also increase utilization. 
+
+### SGEMM Decomposition
+The SGEMM CUBLAS function used for matrix multiplication seems to be replaced by one of two kernels by the compiler. One is called gemm_SN_NN and runs faster and with more threads. The other is maxwell_sgemm which is slower with less threads. Figuring out how to make sure it picks the faster gemm_SN_NN kernel would improve parallelization and runtime.
+
+### Memory
+There's a few memory related optimizations that can likely be made. First is using pinned memory, a majority of the host to device transfers are constant which is well suited for the faster pinned memory transfers CUDA offers. Second is device to device transfers, profiling shows these seem to have a slower bandwidth than host to device `I thought they were supposed to be significantly faster?` so finding a better way to copy data that's on the device already could prove effective. Third is optimizing a memory transfer used to set up for matrix inversion. The CUBLAS function for matrix inversion requires the array be a part of a batch. This conversion requires copying a pointer from host to device which is fairly costly given the kernel launch time and small size of the data being transferred. NSight shows that other transfers have a 4-5x times higher bandwidth. Finding a better method for this conversion would improve efficiency. 
+
+### Innovation Bank Optimization
+NSight shows a roughly 22% increase in the number of kernel launches in the Adaptive Implementation when compared with the Non-Adaptive Implementation. Investigating ways to reduce the number of extra kernels could increase performance.
+
+### Custom Kernel Optimization
+In addition to the CUBLAS functions one custom kernel is used to perform subtraction. NSight says the code doesn't spend long in this kernel but it is both slower and has lower occupancy than the CUBLAS axpy kernel which performs a similar function. Axpy could potentially be used instead of the custom kernel but would require an additional memory copy.
 
 [1] Bar-Shalom, Yaakov, Xiao-Rong Li, and Thiagalingam Kirubarajan. Estimation with Applications to Tracking and Navigation. New York: Wiley, p. 424, 2001.
 

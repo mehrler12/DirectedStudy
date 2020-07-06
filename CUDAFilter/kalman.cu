@@ -75,8 +75,7 @@ void kalman(float measurements[][16],int num_measurements, int measurement_rows,
     int four_by_four_float_array_size = measurement_columns * measurement_rows* sizeof(float);
 
     result = (float*) malloc(four_by_four_float_array_size);
-    testing = (float*) malloc(four_by_four_float_array_size);
-    
+
     cudaMalloc((void **) &dev_measurement,four_by_four_float_array_size);
     cudaMalloc((void **) &dev_state_trans_matrix,four_by_four_float_array_size);
     cudaMalloc((void **) &dev_result,four_by_four_float_array_size);
@@ -186,7 +185,7 @@ void kalman(float measurements[][16],int num_measurements, int measurement_rows,
         checkCublasError(stat,16);
         
         cudaMemcpy(result,dev_result,four_by_four_float_array_size,cudaMemcpyDeviceToHost);
-        printMatrix(result,measurement_rows,measurement_columns);
+        //printMatrix(result,measurement_rows,measurement_columns);
     }
     cudaFree(dev_measurement);
     cudaFree(dev_state_trans_matrix);
@@ -199,10 +198,20 @@ void kalman(float measurements[][16],int num_measurements, int measurement_rows,
     cudaFree(dev_identity_matrix);
     cudaFree(dev_kalman_gain);
     cudaFree(dev_temp);
+    cudaFree(dev_kalman_top);
+    cudaFree(dev_info);
+    free(result);
+    cublasDestroy(handle);
+
     checkCudaErrors();
 }
 
 int main(){
     auto start_time = std::chrono::system_clock::now();
-    kalman(measurements,100,4,4);
+    //for(int i = 0; i < 100; i++){
+        kalman(measurements,100,4,4);
+    //}
+    auto end_time = std::chrono::system_clock::now();
+    auto elapsed_time = std::chrono::duration_cast< std::chrono::microseconds >( end_time - start_time );
+    std::cout << "average time per run: " << elapsed_time.count() / 100<< " us" << std::endl;
 }
