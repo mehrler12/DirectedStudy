@@ -47,7 +47,7 @@ One final metric we can look at is the value of the residual (difference between
 ![ConstFilter](../Figures/ConstantAccelEps.svg)
 *Figure 4: Total Residual Error per measurement*
 
-## Cuda Implementation
+### Cuda Implementation
 After showing our approach works we are able to move our implementation to a parallel architecture with CUDA. The data generated from the Julia implementation is saved into a C++ header file to be used in the CUDA implementation. Instead of 2D arrays we use 1D arrays stored in column major format to make use of the CUBLAS library for highly optimized parallel matrix operations. As no optimization has been done yet besides using CUBLAS the implementation is fairly similar to the Julia Implementation. 
 
 Specific profiling will be discussed later but we can show correctness of this implementation by comparing the final predicted state of the CUDA implementation with the final predicted state of the Julia implementation. Since the Kalman filter is an iterative process any errors throughout the process would cause the final predicted state to change. The final predicted state of the CUDA implementation matches the Julia implementation so we can assume it to be correct.
@@ -96,7 +96,7 @@ Adding in the adaptive step makes the filtered output much less smooth (this is 
 ![AdaptiveError](../Figures/AdaptiveEps.svg)
 *Figure 10: Residual error for adaptive filter*
 
-## Cuda Implementation
+### Cuda Implementation
 The CUDA implementation of the Adaptive Filter is roughly the same as the Non-Adaptive Filter, they both have the same structure and use CUBLAS for matrix operations. The significant difference is the Innovation Bank, in this implementation we use a 1D matrix of the size of the sliding window times 16 (size of the state matrix). Memory accesses and usage is usually a significant bottleneck for CUDA so needing to store and access an extra 20 matrices could cause significant reduction of parallel suitability. This problem will only get worse as the state matrices get larger in the case of Extremely Large Telescopes.
 
 We can show that the CUDA implementation is working by comparing the final predictions of both implementations. We find that they are very slightly different but close enough that it is likely a floating point error, however this will be investigated further in the future. 
