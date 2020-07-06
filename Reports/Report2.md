@@ -11,6 +11,7 @@ The problem we chose is tracking 4 separate moving objects on a 2d plane. This g
 | Y Position | Y Position | Y Position | Y Position |
 | X Velocity | X Velocity | X Velocity | X Velocity |
 | Y Velocity | Y Velocity | Y Velocity | Y Velocity |
+
 We generate a gold set of measurements for each object by calculating the position of each object every second according to the equation:
 
 <a href="https://www.codecogs.com/eqnedit.php?latex=P&space;=&space;vt&space;&plus;&space;1/2at^2" target="_blank"><img src="https://latex.codecogs.com/svg.latex?P&space;=&space;vt&space;&plus;&space;1/2at^2" title="P = vt + 1/2at^2" /></a>
@@ -19,17 +20,17 @@ Considering this filter is non adaptive we assume a constant known acceleration.
 
 We then add random noise to the data to get our measurement test set. The gold set of data is shown in Figure 1 and the noisy data is shown in Figure 2.
 
-![ConstGold](..\Figures\ConstantAccelGold.svg)
+![ConstGold](../Figures/ConstantAccelGold.svg)
 *Figure 1: Gold Set for Kinematic Data*
 
-![ConstNoise](..\Figures\ConstAccelNoise.svg)
+![ConstNoise](../Figures/ConstAccelNoise.svg)
 *Figure 2: Noisy Set for Kinematic Data*
 
 For the actual testing we iterate through each measurement and apply the Predict and Update steps of the Kalman Filter described in Report 1. The State Transition and Control Matrices are based off the kinematics equation from above (State Transition handles the velocity section and the Control Matrix handles the acceleration). All transformation matrices as well as the process noise covariance matrix are the identity matrix. The measurement noise covariance matrix is calculated based off the variance of the X Position, Y Position, X Velocity, and Y Velocity considering we know the thresholds for the noise added to them. This is a reasonable assumption as most sensors provide their error as a part of their specifications.   
 
 We can see the results of filtering in Figure 3, the original straight lines from Figure 1 are mostly recovered.
 
-![ConstFilter](..\Figures\ConstAccelFiltered.svg)
+![ConstFilter](../Figures/ConstAccelFiltered.svg)
 *Figure 3: Filtered Set for Kinematic Data*
 
 Additionally the difference between the final position predicted by the filter and the true final position is quite small and is provided below:
@@ -43,7 +44,7 @@ Additionally the difference between the final position predicted by the filter a
 
 One final metric we can look at is the value of the residual (difference between the measurement and the prediction) over time, this gives us an idea of how well the filter is predicting working. In Figure 4 we plot the normalized square of the residual according to [1] and can see it's consistently low.
 
-![ConstFilter](..\Figures\ConstantAccelEps.svg)
+![ConstFilter](../Figures/ConstantAccelEps.svg)
 *Figure 4: Total Residual Error per measurement*
 
 ## Cuda Implementation
@@ -58,10 +59,10 @@ The IAE filter works by storing a sliding window of previous residuals (differen
 
 To fully test the correctness of the adaptive filter we need something for it to adapt to. The wind filter uses changes in wind velocity and direction, here we'll use a large change in acceleration (small changes work too but large ones provide more obvious results). When generating the data we scale up the X acceleration by 100x on the 50th measurement. The resulting new gold set is shown in Figure 5 and the noisy set is shown in Figure 6. 
 
-![AccelGold](..\Figures\AccelGold.svg)
+![AccelGold](../Figures/AccelGold.svg)
 *Figure 5: Gold Set for Data with Acceleration Change*
 
-![AccelNoise](..\Figures\AccelNoise.svg)
+![AccelNoise](../Figures/AccelNoise.svg)
 *Figure 6: Noisy Set for Data with Acceleration Change*
 
 Running the regular Kalman Filter on this data produces a relatively smooth estimate as seen in Figure 8 but produces a fairly poor estimate of the final position of the objects, particularly in the X direction by the errors given below.
@@ -73,11 +74,11 @@ Running the regular Kalman Filter on this data produces a relatively smooth esti
 | 6.39331  | -5.86632 | 3.47124 | -0.0962858 |
 | -0.463265 | 0.342064 |  0.0178901 | -0.699094 |
 
-![AccelFilter](..\Figures\AccelFilterNonAdaptive.svg)
+![AccelFilter](../Figures/AccelFilterNonAdaptive.svg)
 *Figure 7: Filtered Data for Non Adaptive*
 
 Additionally, as seen in Figure 8 the residual error never recovers from the change in acceleration.
-![AccelEps](..\Figures\AccelEps.svg)
+![AccelEps](../Figures/AccelEps.svg)
 *Figure 8: Residual Error for Non-Adaptive Filter with Acceleration Change*
 
 Adding in the adaptive step makes the filtered output much less smooth (this is because it knows it needs to trust the measurements more after the change in acceleration) as seen in Figure 9. However we do see that the prediction of the final positions are considerably better and the residual error quickly recovers from the acceleration change in Figure 10.
@@ -89,10 +90,10 @@ Adding in the adaptive step makes the filtered output much less smooth (this is 
 | -0.7435  | -0.188036|  -0.461091 |  -0.0928009 |
 | -0.340537| 0.139955 | -0.0736227 | -0.0159091 |
 
-![AccelAdaptFilter](..\Figures\AccelAdaptiveFiltered.svg)
+![AccelAdaptFilter](../Figures/AccelAdaptiveFiltered.svg)
 *Figure 9: Filtered Data for Acceleration change with adaptation*
 
-![AdaptiveError](..\Figures\AdaptiveEps.svg)
+![AdaptiveError](../Figures/AdaptiveEps.svg)
 *Figure 10: Residual error for adaptive filter*
 
 ## Cuda Implementation
