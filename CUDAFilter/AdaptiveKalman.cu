@@ -222,7 +222,7 @@ void kalman(float measurements[][16],int num_measurements, int measurement_rows,
         stat = cublasSgemm(handle, CUBLAS_OP_N, CUBLAS_OP_N, measurement_rows, measurement_columns, measurement_columns, &alpha, dev_kalman_gain, measurement_rows, dev_identity_matrix, measurement_rows, &beta, dev_temp, measurement_rows);
         checkCublasError(stat,15);
         //I-
-        elementSubtractBMinusA<<<4,4>>>(dev_temp,dev_identity_matrix,measurement_rows,measurement_columns);
+        elementSubtractBMinusA<<<1,16>>>(dev_temp,dev_identity_matrix,measurement_rows,measurement_columns);
         checkCudaErrors();
         //*P
         stat = cublasSgemm(handle, CUBLAS_OP_N, CUBLAS_OP_N, measurement_rows, measurement_columns, measurement_columns, &alpha, dev_temp, measurement_rows, dev_process_error, measurement_rows, &beta, dev_process_error, measurement_rows);

@@ -2,7 +2,8 @@
 
 ## Kalman Filter Implementation
 
-A basic non parallel implementation of the Kalman Filter can be found in the Kalman.ipynb Julia notebook. As the main focus of this project is to evaluate the parallel suitability of the Kalman Filter vs the Adaptive Kalman filter we choose a simpler and more generalizable problem than the Adaptive Optics problem outlined in Report 1. This eases implementation and makes proving correctness much simpler. To make sure the work is still generalizable to AO and other problems we make no optimizations based on the contents of the matrices, as matrices that are sparse in this problem may be dense in others. 
+A basic non parallel implementation of the Kalman Filter can be found in the Kalman.ipynb Julia notebook. As the main focus of this project is to evaluate the parallel suitability of the Kalman Filter vs the Adaptive Kalman filter we choose a simpler and more generalizable problem than the Adaptive Optics problem outlined in Report 1. This eases implementation and makes proving correctness much simpler. To make sure the work is still generalizable to AO and other problems we make no optimizations or design choices based on the contents of the matrices, as matrices that are sparse or an identity matrix in this problem may be dense or non-identity
+ in others. 
 
 The problem we chose is tracking 4 separate moving objects on a 2d plane. This gives us a 4x4 state matrix as shown:
 | Object1 | Object2 | Object3 | Object4 |
@@ -42,7 +43,7 @@ Additionally the difference between the final position predicted by the filter a
 |  0.201361 |  0.1551  |  0.621997 | -0.0246627 |
 |  0.232006 |  0.140774 |  0.410157 | -0.042959 |
 
-One final metric we can look at is the value of the residual (difference between the measurement and the prediction) over time, this gives us an idea of how well the filter is predicting working. In Figure 4 we plot the normalized square of the residual according to [1] and can see it's consistently low.
+One final metric we can look at is the value of the residual (difference between the measurement and the prediction) over time, this gives us an idea of how well the filter is predicting working. In Figure 4 we plot the normalized square of the residual according to [1][Hongwei2006] and can see it's consistently low.
 
 ![ConstFilter](../Figures/ConstantAccelEps.svg)
 *Figure 4: Total Residual Error per measurement*
@@ -53,9 +54,9 @@ After showing our approach works we are able to move our implementation to a par
 Specific profiling will be discussed later but we can show correctness of this implementation by comparing the final predicted state of the CUDA implementation with the final predicted state of the Julia implementation. Since the Kalman filter is an iterative process any errors throughout the process would cause the final predicted state to change. The final predicted state of the CUDA implementation matches the Julia implementation so we can assume it to be correct.
 
 ## Adaptive Kalman Filter Implementation
-The IAE Kalman Filter was implemented for this section. This filter was chosen as it is similar to the wind estimation filter as they both use additional data to provide an estimate of the process noise. The IAE filter is more generalizable to other problems and easier to show it's working. 
+The IAE Kalman Filter was implemented for this section. This filter was chosen as it is similar to the wind estimation filter as they both use additional data to provide an estimate of the process noise. The IAE filter is more generalizable and widely used in other problems and easier to show it's working. 
 
-The IAE filter works by storing a sliding window of previous residuals (difference between filtered prediction), it uses these to calculate a covariance matrix for the window of residuals or the "Innovation Bank". We can then get an estimate of the process noise from this multiplying by the Kalman Gain and it's transpose which are computed as part of the update step of the Kalman Filter. We only start using this estimate when we've filled the innovation bank (for this experiment the innovation bank contains 20 measurements). 
+The IAE filter works by storing a sliding window of previous residuals (difference between filtered prediction and measurement), it uses these to calculate a covariance matrix for the window of residuals or the "Innovation Bank". We can then get an estimate of the process noise from this multiplying by the Kalman Gain and it's transpose which are computed as part of the update step of the Kalman Filter. We only start using this estimate when we've filled the innovation bank (for this experiment the innovation bank contains 20 measurements) [2][BarShalom2001]. 
 
 To fully test the correctness of the adaptive filter we need something for it to adapt to. The wind filter uses changes in wind velocity and direction, here we'll use a large change in acceleration (small changes work too but large ones provide more obvious results). When generating the data we scale up the X acceleration by 100x on the 50th measurement. The resulting new gold set is shown in Figure 5 and the noisy set is shown in Figure 6. 
 
@@ -112,16 +113,23 @@ Profiling using Nvidia Nsight reveals some interesting areas for optimization, t
 GPU Utilization is remarkably low at around 13%. This suggests that we might be able to perform some of the CUBLAS operations simultaneously in different CUDA streams. Additionally transferring the new measurement to device and the filtered measurement to host asynchronously could also increase utilization. 
 
 ### SGEMM Decomposition
-The SGEMM CUBLAS function used for matrix multiplication seems to be replaced by one of two kernels by the compiler. One is called gemm_SN_NN and runs faster and with more threads. The other is maxwell_sgemm which is slower with less threads. Figuring out how to make sure it picks the faster gemm_SN_NN kernel would improve parallelization and runtime.
+The SGEMM CUBLAS function used for matrix multiplication seems to be replaced by one of two kernels by the compiler. One is called gemm_SN_NN and runs faster (~3.5us) and with more threads (128 threads). The other is maxwell_sgemm which is slower (~11us) with less threads (64 threads). Figuring out how to make sure it picks the faster gemm_SN_NN kernel would improve parallelization and runtime.
 
 ### Memory
-There's a few memory related optimizations that can likely be made. First is using pinned memory, a majority of the host to device transfers are constant which is well suited for the faster pinned memory transfers CUDA offers. Second is device to device transfers, profiling shows these seem to have a slower bandwidth than host to device `I thought they were supposed to be significantly faster?` so finding a better way to copy data that's on the device already could prove effective. Third is optimizing a memory transfer used to set up for matrix inversion. The CUBLAS function for matrix inversion requires the array be a part of a batch. This conversion requires copying a pointer from host to device which is fairly costly given the kernel launch time and small size of the data being transferred. NSight shows that other transfers have a 4-5x times higher bandwidth. Finding a better method for this conversion would improve efficiency. 
+There's a few memory related optimizations that can likely be made. First is using pinned memory, a majority of the host to device transfers are constant which is well suited for the faster pinned memory transfers CUDA offers. This transfer could also potentially be improved by transferring all the constant matrices at once instead of one at a time.
+
+Second is device to device transfers, profiling shows these seem to have an approximate bandwidth of 30MB/s where host to device has a bandwidth of about 50MB/s so finding a better way to copy data that's on the device already could prove effective.
+
+Third is optimizing a memory transfer used to set up for matrix inversion. The CUBLAS function for matrix inversion requires the array be a part of a batch. This conversion requires copying a pointer from host to device which is fairly costly given the kernel launch time and small size of the data being transferred. NSight shows that other transfers have a 6-8x times higher bandwidth (~6 vs ~50MB/s). Finding a better method for this conversion would improve efficiency. 
 
 ### Innovation Bank Optimization
 NSight shows a roughly 22% increase in the number of kernel launches in the Adaptive Implementation when compared with the Non-Adaptive Implementation. Investigating ways to reduce the number of extra kernels could increase performance.
 
 ### Custom Kernel Optimization
-In addition to the CUBLAS functions one custom kernel is used to perform subtraction. NSight says the code doesn't spend long in this kernel but it is both slower and has lower occupancy than the CUBLAS axpy kernel which performs a similar function. Axpy could potentially be used instead of the custom kernel but would require an additional memory copy.
+In addition to the CUBLAS functions one custom kernel is used to perform subtraction. NSight says the code doesn't spend long in this kernel but has an occupancy of 50% and launches 16 threads vs CUBLAS Axpy's 100% occupancy and 256 threads. Axpy performs a fairly similar function to this kernel but is more general. The extra threads and occupancy could just be that Axpy can do a little more but may suggest that there's some room for optimization. This is supported by the fact that the kernels have similar execution time even though the custom one does less and is more specialized.
 
-[1] Bar-Shalom, Yaakov, Xiao-Rong Li, and Thiagalingam Kirubarajan. Estimation with Applications to Tracking and Navigation. New York: Wiley, p. 424, 2001.
+Another custom kernel is used to calculate the mean of the innovation bank. This kernel could likely benefit from using a parallel reduction as it currently only uses 16 threads.
 
+[BarShalom2001]: http://read.pudn.com/downloads117/ebook/497286/Estimation%20with%20Applications%20to%20Tracking%20and%20Navigation%E6%9D%8E%E6%99%93%E6%A6%95.pdf "Bar-Shalom, Yaakov, Xiao-Rong Li, and Thiagalingam Kirubarajan. Estimation with Applications to Tracking and Navigation. New York: Wiley, p. 424, 2001."
+
+[Hongwei2006]: https://ieeexplore.ieee.org/document/6071380?arnumber=6071380&tag=1 "B. Hongwei, J. Zhihua, and T. Weifeng, “IAE-adaptive Kalman filter for INS/GPS integrated navigation system,” Journal of Systems Engineering and Electronics, vol. 17, no. 3, pp. 502–508, Sep. 2006, doi: 10.1016/S1004-4132(06)60086-8."
