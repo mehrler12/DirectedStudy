@@ -4,7 +4,7 @@
 #include "C:\Users\62793\CSC591\DirectedStudy\data\measurements.hpp"
 
 #define WINDOW_SIZE 20
-#define THREADS_FOR_RED 10
+#define THREADS_FOR_RED 16
 #define STATE_TRANS 0
 #define CONTROL_MATRIX 16
 #define IDENTITY_MATRIX 32
@@ -81,9 +81,9 @@ __global__ void elementSubtractBMinusA(float *a, float *b, int rows, int cols){
 }
 
 __global__ void calcMean(float *a,float *b,int rows,int cols,int stackHeight){
-    __shared__ float redData[THREADS_FOR_RED +6];
+    __shared__ float redData[THREADS_FOR_RED];
     
-    if(threadIdx.x < THREADS_FOR_RED){
+    if(threadIdx.x < stackHeight/2){
         redData[threadIdx.x] = a[((threadIdx.x*2 ) * (rows*cols)) +blockIdx.x] + a[((threadIdx.x*2 + 1)*(rows*cols))+blockIdx.x];
     }else{
         redData[threadIdx.x] = 0;
@@ -117,7 +117,7 @@ float kalman(float measurements[][16],int num_measurements, int measurement_rows
 
     int four_by_four_float_array_size = measurement_columns * measurement_rows* sizeof(float);
 
-    result = (float*) malloc(four_by_four_float_array_size);
+    //result = (float*) malloc(four_by_four_float_array_size);
     
     cudaMalloc((void **) &dev_batch_consts,four_by_four_float_array_size*6);
     cudaMalloc((void **) &dev_measurement,four_by_four_float_array_size);
@@ -132,6 +132,7 @@ float kalman(float measurements[][16],int num_measurements, int measurement_rows
     cudaMalloc((void **) &dev_innovation_bank,four_by_four_float_array_size*WINDOW_SIZE);
     cudaMalloc((void **) &dev_temp2,four_by_four_float_array_size);
     cudaMalloc((void **) &dev_kalman_gain_final,four_by_four_float_array_size);
+    cudaMallocHost((void **) &result, four_by_four_float_array_size);
 
     float *A[] = { dev_temp };
     float** A_d;
@@ -211,7 +212,8 @@ float kalman(float measurements[][16],int num_measurements, int measurement_rows
         checkCudaErrors();
         
         if(i>=WINDOW_SIZE){
-            calcMean<<<16,16,(THREADS_FOR_RED+6)*sizeof(float),stream2>>>(dev_innovation_bank,dev_temp2,measurement_rows,measurement_columns,WINDOW_SIZE);
+
+            calcMean<<<16,16,(THREADS_FOR_RED)*sizeof(float),stream2>>>(dev_innovation_bank,dev_temp2,measurement_rows,measurement_columns,WINDOW_SIZE);
             checkCudaErrors();
 
             cublasSetStream(handle,stream2);
@@ -268,7 +270,7 @@ float kalman(float measurements[][16],int num_measurements, int measurement_rows
 
         //cudaDeviceSynchronize();
         cudaMemcpyAsync(result,dev_result,four_by_four_float_array_size,cudaMemcpyDeviceToHost,stream1);
-
+        checkCudaErrors();
         //printMatrix(result,measurement_rows,measurement_columns);   
     }
     auto end_time = std::chrono::system_clock::now();
@@ -285,7 +287,7 @@ float kalman(float measurements[][16],int num_measurements, int measurement_rows
     cudaFree(dev_info);
     cudaFree(dev_innovation_bank);
     cudaFree(dev_residual);
-    free(result);
+    cudaFreeHost(result);
     cublasDestroy(handle);
     cudaStreamDestroy(stream1);
     cudaStreamDestroy(stream2);
