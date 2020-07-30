@@ -183,7 +183,6 @@ float kalman(float measurements[][16],int num_measurements, int measurement_rows
         //A*(p-1)
         stat = cublasSgemm(handle, CUBLAS_OP_N, CUBLAS_OP_N, measurement_rows, measurement_columns, measurement_columns, &alpha,  &dev_batch_consts[STATE_TRANS], measurement_rows, dev_process_error, measurement_rows, &beta, dev_process_error, measurement_rows);
         checkCublasError(stat,3);
-
         //*At
         stat = cublasSgemm(handle, CUBLAS_OP_N, CUBLAS_OP_N, measurement_rows, measurement_columns, measurement_columns, &alpha, dev_process_error, measurement_rows,  &dev_batch_consts[STATE_TRANS_TRANSPOSE], measurement_rows, &beta, dev_process_error, measurement_rows);
         checkCublasError(stat,4);
@@ -299,9 +298,9 @@ float kalman(float measurements[][16],int num_measurements, int measurement_rows
 int main(){
     float tpm = 0;
     auto start_time = std::chrono::system_clock::now();
-    for(int i = 0; i < 100; i++){
+    //for(int i = 0; i < 100; i++){
         tpm += kalman(measurements,100,4,4);
-    }
+    //}
     auto end_time = std::chrono::system_clock::now();
     auto elapsed_time = std::chrono::duration_cast< std::chrono::microseconds >( end_time - start_time );
     std::cout << "average time per run: " << elapsed_time.count() / static_cast< float >( 100)<< " us" << std::endl;
