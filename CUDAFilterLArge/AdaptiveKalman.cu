@@ -13,7 +13,6 @@
 #define STATE_TRANS_TRANSPOSE 16384
 #define IDENTITY_MATRIX_TRANSPOSE 20480 //I realize this is just the identity again, wanted to include it for size anyway
 
-
 void printMatrix(float *a, int rows, int cols){
     for(int i = 0; i < rows; i++){
         for(int j = 0; j <cols;j++){
@@ -79,8 +78,15 @@ __global__ void marker(int *i){
     i += index;
 }
 
+void checkMatrix(float *r, float *result, int size, int rows, int cols){
+    cudaDeviceSynchronize();
+    cudaMemcpy(result,r,size,cudaMemcpyDeviceToHost);
+    printMatrix(result,rows,cols);
+    checkCudaErrors();
+}
+
 float kalman(float measurements[][4096],int num_measurements, int measurement_rows, int measurement_columns){
-    float *dev_measurement,*dev_result, *dev_process_noise,*dev_prediction,*dev_process_error,*dev_kalman_gain,*dev_temp;
+    float *dev_measurement,*dev_result, *dev_process_noise,*dev_invert_result,*dev_process_error,*dev_kalman_gain,*dev_temp;
     float *result;
     int *dev_info;
     float *dev_residual;
@@ -99,7 +105,7 @@ float kalman(float measurements[][4096],int num_measurements, int measurement_ro
     cudaMalloc((void **) &dev_measurement,four_by_four_float_array_size);
     cudaMalloc((void **) &dev_result,four_by_four_float_array_size);
     cudaMalloc((void **) &dev_process_noise,four_by_four_float_array_size);
-    cudaMalloc((void **) &dev_prediction,four_by_four_float_array_size);
+    cudaMalloc((void **) &dev_invert_result,four_by_four_float_array_size);
     cudaMalloc((void **) &dev_process_error,four_by_four_float_array_size);
     cudaMalloc((void **) &dev_kalman_gain,four_by_four_float_array_size);
     cudaMalloc((void **) &dev_temp,four_by_four_float_array_size);
@@ -116,6 +122,12 @@ float kalman(float measurements[][4096],int num_measurements, int measurement_ro
     float** A_d;
     cudaMalloc<float*>(&A_d,sizeof(A));
     cudaMemcpy(A_d,A,sizeof(A),cudaMemcpyHostToDevice);
+    checkCudaErrors();
+
+    float *C[] = { dev_invert_result };
+    float** C_d;
+    cudaMalloc<float*>(&C_d,sizeof(C));
+    cudaMemcpy(C_d,C,sizeof(C),cudaMemcpyHostToDevice);
     checkCudaErrors();
    
     checkCudaErrors();
@@ -146,11 +158,9 @@ float kalman(float measurements[][4096],int num_measurements, int measurement_ro
 
     auto start_time = std::chrono::system_clock::now();
     for(int i=1;i<num_measurements;i++){
-        printf("Iteration %d\n",i);
-
         cudaMemcpyAsync(dev_measurement,measurements[i],four_by_four_float_array_size,cudaMemcpyHostToDevice,stream1);
         checkCudaErrors(); 
-        
+
         //predict
         //A*(x-1)
         cublasSetStream(handle,stream2);
@@ -159,7 +169,7 @@ float kalman(float measurements[][4096],int num_measurements, int measurement_ro
         //+Buk
         stat = cublasSaxpy(handle, measurement_rows*measurement_columns,&alpha,&dev_batch_consts[CONTROL_MATRIX],1,dev_result,1);
         checkCublasError(stat,2);
-
+        
         cublasSetStream(handle,stream3);
         //A*(p-1)
         stat = cublasSgemm(handle, CUBLAS_OP_N, CUBLAS_OP_N, measurement_rows, measurement_columns, measurement_columns, &alpha,  &dev_batch_consts[STATE_TRANS], measurement_rows, dev_process_error, measurement_rows, &beta, dev_process_error, measurement_rows);
@@ -170,8 +180,7 @@ float kalman(float measurements[][4096],int num_measurements, int measurement_ro
         //+Q
         stat = cublasSaxpy(handle, measurement_rows*measurement_columns,&alpha,dev_process_noise,1,dev_process_error,1);
         checkCublasError(stat,5);
-
-
+        
         cublasSetStream(handle,stream2);
         //Calculate Residual
         //H*Xp
@@ -182,13 +191,6 @@ float kalman(float measurements[][4096],int num_measurements, int measurement_ro
         //Y-
         elementSubtractBMinusA<<<measurement_rows,measurement_rows,0,stream2>>>(dev_residual,dev_measurement,measurement_rows,measurement_columns);
         checkCudaErrors();
-        
-        //cudaDeviceSynchronize();
-        //cudaMemcpy(result,dev_residual,four_by_four_float_array_size,cudaMemcpyDeviceToHost);
-        //checkCudaErrors();
-        //printMatrix(result,measurement_rows,measurement_columns); 
-        //return 0;
-
 
         //Adaptation
         //Res*Tranpose(res)
@@ -200,8 +202,7 @@ float kalman(float measurements[][4096],int num_measurements, int measurement_ro
         cudaMemcpyAsync(dev_innovation_bank + offset,dev_temp2,four_by_four_float_array_size,cudaMemcpyDeviceToDevice,stream2);
         checkCudaErrors();
         
-        if(i>=10000){
-            printf("test %d\n",i);
+        if(i>=WINDOW_SIZE){
             calcMean<<<measurement_rows*measurement_columns,THREADS_FOR_RED,(THREADS_FOR_RED)*sizeof(float),stream2>>>(dev_innovation_bank,dev_temp2,measurement_rows,measurement_columns,WINDOW_SIZE);
             checkCudaErrors();  
 
@@ -228,26 +229,18 @@ float kalman(float measurements[][4096],int num_measurements, int measurement_ro
         //+R
         stat = cublasSaxpy(handle, measurement_rows*measurement_columns,&alpha, &dev_batch_consts[MEASUREMENT_NOISE],1,dev_temp,1);
         checkCublasError(stat,__LINE__);
-        
 
         stat = cublasSgetrfBatched(handle,measurement_rows,A_d,measurement_rows,dev_pivot,dev_info,1);
         checkCublasError(stat,__LINE__);
-        stat = cublasSgetriBatched(handle,measurement_rows,A_d,measurement_rows,dev_pivot,A_d,measurement_rows,dev_info,1);
-        //K = (P*Ht)/(H*P*Ht+R)
-        //stat = cublasSmatinvBatched(handle,4,A_d,4,A_d,4,dev_info,1);
-        checkCublasError(stat,__LINE__);
 
+        stat = cublasSgetriBatched(handle,measurement_rows,A_d,measurement_rows,dev_pivot,C_d,measurement_rows,dev_info,1);
+        //K = (P*Ht)/(H*P*Ht+R)
+        checkCublasError(stat,__LINE__);
         cudaDeviceSynchronize();
 
-        stat = cublasSgemm(handle, CUBLAS_OP_N, CUBLAS_OP_N, measurement_rows, measurement_columns, measurement_columns, &alpha, dev_kalman_gain, measurement_rows, A[0], measurement_rows, &beta, dev_kalman_gain_final, measurement_rows);
+        stat = cublasSgemm(handle, CUBLAS_OP_N, CUBLAS_OP_N, measurement_rows, measurement_columns, measurement_columns, &alpha, dev_kalman_gain, measurement_rows, dev_invert_result, measurement_rows, &beta, dev_kalman_gain_final, measurement_rows);
         checkCublasError(stat,11);
-        //cudaMemcpy(result,dev_kalman_gain_final,four_by_four_float_array_size,cudaMemcpyDeviceToHost);
-        //checkCudaErrors();
-        //printMatrix(result,measurement_rows,measurement_columns);
 
-        //cudaMemcpy(result,dev_kalman_gain_final,four_by_four_float_array_size,cudaMemcpyDeviceToHost);
-        checkCudaErrors();
-        //printMatrix(result,measurement_rows,measurement_columns);
         
         cudaStreamSynchronize(stream1);
         //K*Residual
@@ -271,8 +264,7 @@ float kalman(float measurements[][4096],int num_measurements, int measurement_ro
         //cudaDeviceSynchronize();
         cudaMemcpyAsync(result,dev_result,four_by_four_float_array_size,cudaMemcpyDeviceToHost,stream1);
         checkCudaErrors();
-        printMatrix(result,measurement_rows,measurement_columns);  
-        //printf("\n\n%d\n\n",i);
+        //printMatrix(result,measurement_rows,measurement_columns);  
     }
     auto end_time = std::chrono::system_clock::now();
     auto elapsed_time = std::chrono::duration_cast< std::chrono::milliseconds >( end_time - start_time ).count()/static_cast<float>(100);
@@ -281,7 +273,7 @@ float kalman(float measurements[][4096],int num_measurements, int measurement_ro
     cudaFree(dev_measurement);
     cudaFree(dev_result);
     cudaFree(dev_process_noise);
-    cudaFree(dev_prediction);
+    cudaFree(dev_invert_result);
     cudaFree(dev_process_error);
     cudaFree(dev_kalman_gain);
     cudaFree(dev_temp);
@@ -300,9 +292,9 @@ float kalman(float measurements[][4096],int num_measurements, int measurement_ro
 int main(){
     float tpm = 0;
     auto start_time = std::chrono::system_clock::now();
-    //for(int i = 0; i < 100; i++){
+    for(int i = 0; i < 100; i++){
         tpm += kalman(measurements,NUM_OF_MEASUREMENTS,64,64);
-    //}
+    }
     auto end_time = std::chrono::system_clock::now();
     auto elapsed_time = std::chrono::duration_cast< std::chrono::microseconds >( end_time - start_time );
     std::cout << "average time per run: " << elapsed_time.count() / static_cast< float >( NUM_OF_MEASUREMENTS)<< " us" << std::endl;

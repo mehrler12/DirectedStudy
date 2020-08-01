@@ -3,7 +3,7 @@ msize =64
 numofmeasurements = 500
 measurements = ones(msize,msize,numofmeasurements) - rand(-.1:.0001:.1,msize,msize,numofmeasurements)
 iden = diagm(repeat([1],64))
-consts = vec(hcat(iden,zeros(msize,msize),iden,iden./10,iden,iden))
+consts = vec(hcat(iden,zeros(msize,msize),iden,iden./20,iden,iden))
 #consts = rand(msize*msize*6)
 zerosinit = zeros(msize*msize)
 
