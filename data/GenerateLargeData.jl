@@ -1,8 +1,8 @@
 using LinearAlgebra
 msize =64
-numofmeasurements = 500
+numofmeasurements = 100
 measurements = ones(msize,msize,numofmeasurements) - rand(-.1:.0001:.1,msize,msize,numofmeasurements)
-iden = diagm(repeat([1],64))
+iden = diagm(repeat([1],msize))
 consts = vec(hcat(iden,zeros(msize,msize),iden,iden./20,iden,iden))
 #consts = rand(msize*msize*6)
 zerosinit = zeros(msize*msize)

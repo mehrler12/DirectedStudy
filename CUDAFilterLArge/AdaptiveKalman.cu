@@ -3,15 +3,15 @@
 #include "cublas_v2.h"
 #include "C:\Users\62793\CSC591\DirectedStudy\data\largeMeasurements.hpp"
 
-#define NUM_OF_MEASUREMENTS 500
-#define WINDOW_SIZE 40
-#define THREADS_FOR_RED 32
+#define NUM_OF_MEASUREMENTS 100
+#define WINDOW_SIZE 20
+#define MEASUREMENT_SIZE 64
 #define STATE_TRANS 0
-#define CONTROL_MATRIX 4096
-#define IDENTITY_MATRIX 8192
-#define MEASUREMENT_NOISE 12288
-#define STATE_TRANS_TRANSPOSE 16384
-#define IDENTITY_MATRIX_TRANSPOSE 20480 //I realize this is just the identity again, wanted to include it for size anyway
+#define CONTROL_MATRIX MEASUREMENT_SIZE*MEASUREMENT_SIZE
+#define IDENTITY_MATRIX MEASUREMENT_SIZE*MEASUREMENT_SIZE *2
+#define MEASUREMENT_NOISE MEASUREMENT_SIZE*MEASUREMENT_SIZE *3
+#define STATE_TRANS_TRANSPOSE MEASUREMENT_SIZE*MEASUREMENT_SIZE *4
+#define IDENTITY_MATRIX_TRANSPOSE MEASUREMENT_SIZE*MEASUREMENT_SIZE *5//I realize this is just the identity again, wanted to include it for size anyway
 
 void printMatrix(float *a, int rows, int cols){
     for(int i = 0; i < rows; i++){
@@ -53,24 +53,34 @@ __global__ void elementSubtractBMinusA(float *a, float *b, int rows, int cols){
     }
 }
 
-__global__ void calcMean(float *a,float *b,int rows,int cols,int stackHeight){
-    __shared__ float redData[THREADS_FOR_RED];
+// __global__ void calcMean(float *a,float *b,int rows,int cols,int stackHeight){
+//     __shared__ float redData[THREADS_FOR_RED];
     
-    if(threadIdx.x < stackHeight/2){
-        redData[threadIdx.x] = a[((threadIdx.x*2 ) * (rows*cols)) +blockIdx.x] + a[((threadIdx.x*2 + 1)*(rows*cols))+blockIdx.x];
-    }else{
-        redData[threadIdx.x] = 0;
-    }
+//     if(threadIdx.x < stackHeight/2){
+//         redData[threadIdx.x] = a[((threadIdx.x*2 ) * (rows*cols)) +blockIdx.x] + a[((threadIdx.x*2 + 1)*(rows*cols))+blockIdx.x];
+//     }else{
+//         redData[threadIdx.x] = 0;
+//     }
 
-    __syncthreads();
+//     __syncthreads();
 
-    for(int i = 1; i < blockDim.x; i *= 2){
-        if( threadIdx.x  % (2 *i) == 0){
-            redData[threadIdx.x] += redData[threadIdx.x + i];
-        }
-        __syncthreads();
+//     for(int i = 1; i < blockDim.x; i *= 2){
+//         if( threadIdx.x  % (2 *i) == 0){
+//             redData[threadIdx.x] += redData[threadIdx.x + i];
+//         }
+//         __syncthreads();
+//     }
+//     b[blockIdx.x] = redData[0]/stackHeight;
+// }
+
+__global__ void calcMeanAndStore(float *running_sum, float *innovation_bank,float *new_measurement,float *result,int offset,int stackHeight,int rows,int cols){
+    int const index = threadIdx.x + blockIdx.x * blockDim.x;
+    if(index < rows*cols){
+        running_sum[index] -= innovation_bank[offset+index];
+        running_sum[index] += new_measurement[index];
+        innovation_bank[offset+index] = new_measurement[index];
+        result[index] = running_sum[index]/stackHeight;
     }
-    b[blockIdx.x] = redData[0]/stackHeight;
 }
 
 __global__ void marker(int *i){
@@ -85,7 +95,7 @@ void checkMatrix(float *r, float *result, int size, int rows, int cols){
     checkCudaErrors();
 }
 
-float kalman(float measurements[][4096],int num_measurements, int measurement_rows, int measurement_columns){
+float kalman(float measurements[][MEASUREMENT_SIZE*MEASUREMENT_SIZE],int num_measurements, int measurement_rows, int measurement_columns){
     float *dev_measurement,*dev_result, *dev_process_noise,*dev_invert_result,*dev_process_error,*dev_kalman_gain,*dev_temp;
     float *result;
     int *dev_info;
@@ -158,6 +168,7 @@ float kalman(float measurements[][4096],int num_measurements, int measurement_ro
 
     auto start_time = std::chrono::system_clock::now();
     for(int i=1;i<num_measurements;i++){
+        //printf("Iteration %d\n",i);
         cudaMemcpyAsync(dev_measurement,measurements[i],four_by_four_float_array_size,cudaMemcpyHostToDevice,stream1);
         checkCudaErrors(); 
 
@@ -199,12 +210,14 @@ float kalman(float measurements[][4096],int num_measurements, int measurement_ro
         checkCublasError(stat,17);
         //Move Residual into bank
         int offset = ((i-1)%WINDOW_SIZE) * measurement_rows* measurement_columns;
-        cudaMemcpyAsync(dev_innovation_bank + offset,dev_temp2,four_by_four_float_array_size,cudaMemcpyDeviceToDevice,stream2);
+        //cudaMemcpyAsync(dev_innovation_bank + offset,dev_temp2,four_by_four_float_array_size,cudaMemcpyDeviceToDevice,stream2);
+        calcMeanAndStore<<<measurement_rows,measurement_columns,0,stream2>>>(dev_running_sum,dev_innovation_bank,dev_temp2,dev_temp2,offset,WINDOW_SIZE,measurement_rows,measurement_columns);
         checkCudaErrors();
         
         if(i>=WINDOW_SIZE){
-            calcMean<<<measurement_rows*measurement_columns,THREADS_FOR_RED,(THREADS_FOR_RED)*sizeof(float),stream2>>>(dev_innovation_bank,dev_temp2,measurement_rows,measurement_columns,WINDOW_SIZE);
-            checkCudaErrors();  
+            //calcMean<<<measurement_rows*measurement_columns,THREADS_FOR_RED,(THREADS_FOR_RED)*sizeof(float),stream2>>>(dev_innovation_bank,dev_temp2,measurement_rows,measurement_columns,WINDOW_SIZE);
+            //checkCudaErrors();
+            //checkMatrix(dev_temp2, result, four_by_four_float_array_size, measurement_rows, measurement_columns);  
 
             cublasSetStream(handle,stream2);
             stat = cublasSgemm(handle, CUBLAS_OP_N, CUBLAS_OP_N, measurement_rows, measurement_columns, measurement_columns, &alpha, dev_kalman_gain_final, measurement_rows, dev_temp2, measurement_rows, &beta, dev_temp2, measurement_rows);
@@ -267,19 +280,25 @@ float kalman(float measurements[][4096],int num_measurements, int measurement_ro
         //printMatrix(result,measurement_rows,measurement_columns);  
     }
     auto end_time = std::chrono::system_clock::now();
-    auto elapsed_time = std::chrono::duration_cast< std::chrono::milliseconds >( end_time - start_time ).count()/static_cast<float>(100);
+    auto elapsed_time = std::chrono::duration_cast< std::chrono::milliseconds >( end_time - start_time ).count()/static_cast<float>(NUM_OF_MEASUREMENTS);
     //std::cout << "average time per measurment: " << elapsed_time<< " ms" << std::endl;
 
+
+    cudaFree(dev_batch_consts);
     cudaFree(dev_measurement);
     cudaFree(dev_result);
     cudaFree(dev_process_noise);
     cudaFree(dev_invert_result);
     cudaFree(dev_process_error);
     cudaFree(dev_kalman_gain);
+    cudaFree(dev_kalman_gain_final);
+    cudaFree(dev_running_sum);
     cudaFree(dev_temp);
+    cudaFree(dev_temp2);
     cudaFree(dev_info);
     cudaFree(dev_innovation_bank);
     cudaFree(dev_residual);
+    cudaFree(dev_pivot);
     cudaFreeHost(result);
     cublasDestroy(handle);
     cudaStreamDestroy(stream1);
@@ -292,12 +311,12 @@ float kalman(float measurements[][4096],int num_measurements, int measurement_ro
 int main(){
     float tpm = 0;
     auto start_time = std::chrono::system_clock::now();
-    for(int i = 0; i < 100; i++){
-        tpm += kalman(measurements,NUM_OF_MEASUREMENTS,64,64);
-    }
+    //for(int i = 0; i < 1000; i++){
+        tpm += kalman(measurements,NUM_OF_MEASUREMENTS,MEASUREMENT_SIZE,MEASUREMENT_SIZE);
+    //}
     auto end_time = std::chrono::system_clock::now();
-    auto elapsed_time = std::chrono::duration_cast< std::chrono::microseconds >( end_time - start_time );
-    std::cout << "average time per run: " << elapsed_time.count() / static_cast< float >( NUM_OF_MEASUREMENTS)<< " us" << std::endl;
-    std::cout << "average time per measurment: " << tpm/ static_cast< float >( NUM_OF_MEASUREMENTS)<< " ms" << std::endl;
+    auto elapsed_time = std::chrono::duration_cast< std::chrono::milliseconds >( end_time - start_time );
+    std::cout << "average time per run: " << elapsed_time.count() / static_cast< float >( 1000)<< " ms" << std::endl;
+    std::cout << "average time per measurment: " << tpm/ static_cast< float >( 1000)<< " ms" << std::endl;
 
 }

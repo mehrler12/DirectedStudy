@@ -105,6 +105,16 @@ __global__ void marker(int *i){
     i += index;
 }
 
+__global__ void calcMeanAndStore(float *running_sum, float *innovation_bank,float *new_measurement,float *result,int offset,int stackHeight,int rows,int cols){
+    int const index = threadIdx.x + blockIdx.x * blockDim.x;
+    if(index < rows*cols){
+        running_sum[index] -= innovation_bank[offset+index];
+        running_sum[index] += new_measurement[index];
+        innovation_bank[offset+index] = new_measurement[index];
+        result[index] = running_sum[index]/stackHeight;
+    }
+}
+
 float kalman(float measurements[][16],int num_measurements, int measurement_rows, int measurement_columns){
     float *dev_measurement,*dev_result, *dev_process_noise,*dev_prediction,*dev_process_error,*dev_kalman_gain,*dev_temp;
     float *result;
@@ -114,6 +124,8 @@ float kalman(float measurements[][16],int num_measurements, int measurement_rows
     float *dev_batch_consts;
     float *dev_kalman_gain_final;
     float *dev_temp2;
+    float *dev_running_sum;
+
 
     int four_by_four_float_array_size = measurement_columns * measurement_rows* sizeof(float);
 
@@ -132,6 +144,7 @@ float kalman(float measurements[][16],int num_measurements, int measurement_rows
     cudaMalloc((void **) &dev_innovation_bank,four_by_four_float_array_size*WINDOW_SIZE);
     cudaMalloc((void **) &dev_temp2,four_by_four_float_array_size);
     cudaMalloc((void **) &dev_kalman_gain_final,four_by_four_float_array_size);
+    cudaMalloc((void **) &dev_running_sum,four_by_four_float_array_size);
     cudaMallocHost((void **) &result, four_by_four_float_array_size);
 
     float *A[] = { dev_temp };
@@ -207,13 +220,14 @@ float kalman(float measurements[][16],int num_measurements, int measurement_rows
         checkCublasError(stat,17);
         //Move Residual into bank
         int offset = ((i-1)%WINDOW_SIZE) * measurement_rows* measurement_columns;
-        cudaMemcpyAsync(dev_innovation_bank + offset,dev_temp2,four_by_four_float_array_size,cudaMemcpyDeviceToDevice,stream2);
+        //cudaMemcpyAsync(dev_innovation_bank + offset,dev_temp2,four_by_four_float_array_size,cudaMemcpyDeviceToDevice,stream2);
+        calcMeanAndStore<<<measurement_rows,measurement_columns,0,stream2>>>(dev_running_sum,dev_innovation_bank,dev_temp2,dev_temp2,offset,WINDOW_SIZE,measurement_rows,measurement_columns);
         checkCudaErrors();
         
         if(i>=WINDOW_SIZE){
-
-            calcMean<<<16,16,(THREADS_FOR_RED)*sizeof(float),stream2>>>(dev_innovation_bank,dev_temp2,measurement_rows,measurement_columns,WINDOW_SIZE);
-            checkCudaErrors();
+            //calcMean<<<measurement_rows*measurement_columns,THREADS_FOR_RED,(THREADS_FOR_RED)*sizeof(float),stream2>>>(dev_innovation_bank,dev_temp2,measurement_rows,measurement_columns,WINDOW_SIZE);
+            //checkCudaErrors();
+            //checkMatrix(dev_temp2, result, four_by_four_float_array_size, measurement_rows, measurement_columns);  
 
             cublasSetStream(handle,stream2);
             stat = cublasSgemm(handle, CUBLAS_OP_N, CUBLAS_OP_N, measurement_rows, measurement_columns, measurement_columns, &alpha, dev_kalman_gain_final, measurement_rows, dev_temp2, measurement_rows, &beta, dev_temp2, measurement_rows);
@@ -298,12 +312,12 @@ float kalman(float measurements[][16],int num_measurements, int measurement_rows
 int main(){
     float tpm = 0;
     auto start_time = std::chrono::system_clock::now();
-    //for(int i = 0; i < 100; i++){
+    for(int i = 0; i < 100; i++){
         tpm += kalman(measurements,100,4,4);
-    //}
+    }
     auto end_time = std::chrono::system_clock::now();
-    auto elapsed_time = std::chrono::duration_cast< std::chrono::microseconds >( end_time - start_time );
-    std::cout << "average time per run: " << elapsed_time.count() / static_cast< float >( 100)<< " us" << std::endl;
+    auto elapsed_time = std::chrono::duration_cast< std::chrono::milliseconds >( end_time - start_time );
+    std::cout << "average time per run: " << elapsed_time.count() / static_cast< float >( 100)<< " ms" << std::endl;
     std::cout << "average time per measurment: " << tpm/100.0<< " ms" << std::endl;
-
+    cudaDeviceReset();
 }

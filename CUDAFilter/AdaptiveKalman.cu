@@ -266,7 +266,8 @@ int main(){
         tpm += kalman(measurements,100,4,4);
     }
     auto end_time = std::chrono::system_clock::now();
-    auto elapsed_time = std::chrono::duration_cast< std::chrono::microseconds >( end_time - start_time );
-    std::cout << "average time per run: " << elapsed_time.count() / static_cast< float >( 100)<< " us" << std::endl;
-    std::cout << "average time per measurment: " << tpm/100.0<< " ms" << std::endl;\
+    auto elapsed_time = std::chrono::duration_cast< std::chrono::milliseconds >( end_time - start_time );
+    std::cout << "average time per run: " << elapsed_time.count() / static_cast< float >( 100)<< " ms" << std::endl;
+    std::cout << "average time per measurment: " << tpm/100.0<< " ms" << std::endl;
+    cudaDeviceReset();
 }
