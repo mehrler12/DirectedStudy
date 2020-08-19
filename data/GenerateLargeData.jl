@@ -1,6 +1,6 @@
 using LinearAlgebra
-msize =64
-numofmeasurements = 100
+msize = 64
+numofmeasurements = 10
 measurements = ones(msize,msize,numofmeasurements) - rand(-.1:.0001:.1,msize,msize,numofmeasurements)
 iden = diagm(repeat([1],msize))
 consts = vec(hcat(iden,zeros(msize,msize),iden,iden./20,iden,iden))

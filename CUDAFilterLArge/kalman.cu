@@ -4,8 +4,9 @@
 #include "C:\Users\62793\CSC591\DirectedStudy\data\largeMeasurements.hpp"
 
 #define NUM_OF_MEASUREMENTS 100
+#define NUM_OF_MEASURES_IN_FILE 2
 #define WINDOW_SIZE 20
-#define MEASUREMENT_SIZE 64
+#define MEASUREMENT_SIZE 1024
 #define STATE_TRANS 0
 #define CONTROL_MATRIX MEASUREMENT_SIZE*MEASUREMENT_SIZE
 #define IDENTITY_MATRIX MEASUREMENT_SIZE*MEASUREMENT_SIZE *2
@@ -150,7 +151,8 @@ float kalman(float measurements[][MEASUREMENT_SIZE*MEASUREMENT_SIZE],int num_mea
 
 
     auto start_time = std::chrono::system_clock::now();
-    for(int i=1;i<num_measurements;i++){
+    for(int j=1;j<num_measurements;j++){
+        int i = j % NUM_OF_MEASURES_IN_FILE;
         //printf("Iteration %d\n",i);
         cudaMemcpyAsync(dev_measurement,measurements[i],four_by_four_float_array_size,cudaMemcpyHostToDevice,stream1);
         checkCudaErrors(__LINE__); 
@@ -266,9 +268,9 @@ float kalman(float measurements[][MEASUREMENT_SIZE*MEASUREMENT_SIZE],int num_mea
 int main(){
     float tpm = 0;
     auto start_time = std::chrono::system_clock::now();
-    //for(int i = 0; i < 1000; i++){
+    for(int i = 0; i < 1000; i++){
         tpm += kalman(measurements,NUM_OF_MEASUREMENTS,MEASUREMENT_SIZE,MEASUREMENT_SIZE);
-    //}
+    }
     auto end_time = std::chrono::system_clock::now();
     auto elapsed_time = std::chrono::duration_cast< std::chrono::milliseconds >( end_time - start_time );
     std::cout << "average time per run: " << elapsed_time.count() / static_cast< float >( 1000)<< " ms" << std::endl;
